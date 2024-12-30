@@ -1,92 +1,73 @@
 package application
 
 import (
-	"errors"
-	"github.com/sigurn/crc16"
-	"go_ProFiBus/datalink"
+	"fmt"
 	"go_ProFiBus/serial"
-	"sync"
-	"time"
 )
 
-type ProFiBus struct {
-	physicalLayer *serial.RS485
-	crcTable      *crc16.Table
-	sendChan      chan []byte
-	receiveChan   chan []byte
-	closeChan     chan struct{}
-	wg            sync.WaitGroup
+// ProtocolType 定义支持的协议类型
+type ProtocolType int
+
+const (
+	UART ProtocolType = iota
+	CAN
+	USB
+	OneWire
+	Modbus
+)
+
+// NewProtocolBus 创建一个新的协议总线实例
+func NewProtocolBus(protocol ProtocolType, portName string) (serial.SerialPort, error) {
+	var port serial.SerialPort
+
+	switch protocol {
+	case UART:
+		port = &serial.UART{}
+	case CAN:
+		port = &serial.CAN{}
+	case USB:
+		port = &serial.USB{}
+	case OneWire:
+		port = &serial.OneWire{}
+	case Modbus:
+		port = &serial.Modbus{}
+	default:
+		return nil, fmt.Errorf("不支持的协议类型")
+	}
+
+	// 打开串口
+	if err := port.Open(portName); err != nil {
+		return nil, fmt.Errorf("打开 %s 设备失败: %v", portName, err)
+	}
+
+	return port, nil
 }
 
-func NewProFiBus(portName string, baudRate int, polynomial uint16, initialValue uint16) (*ProFiBus, error) {
-	phy, err := serial.NewRS485(portName, baudRate)
+// ExampleUsage 示例用法
+func ExampleUsage() {
+	portName := "/dev/ttyUSB0" // 根据实际情况修改
+
+	// 创建 UART 总线
+	uartBus, err := NewProtocolBus(UART, portName)
 	if err != nil {
-		return nil, err
+		fmt.Println("错误:", err)
+		return
 	}
-	table := crc16.MakeTable(crc16.Params{Poly: polynomial, Init: initialValue})
-	bus := &ProFiBus{
-		physicalLayer: phy,
-		crcTable:      table,
-		sendChan:      make(chan []byte, 10),
-		receiveChan:   make(chan []byte, 10),
-		closeChan:     make(chan struct{}),
+	defer uartBus.Close()
+
+	// 写入数据
+	dataToSend := []byte("Hello UART")
+	if _, err := uartBus.Write(dataToSend); err != nil {
+		fmt.Println("写入错误:", err)
+		return
 	}
-	bus.wg.Add(2)
-	go bus.sendLoop()
-	go bus.receiveLoop()
-	return bus, nil
-}
 
-func (bus *ProFiBus) sendLoop() {
-	defer bus.wg.Done()
-	for {
-		select {
-		case data := <-bus.sendChan:
-			frame := datalink.NewFrame(data, bus.crcTable)
-			frameData := frame.Marshal()
-			_ = bus.physicalLayer.Write(frameData)
-		case <-bus.closeChan:
-			return
-		}
+	// 读取数据
+	buffer := make([]byte, 100)
+	n, err := uartBus.Read(buffer)
+	if err != nil {
+		fmt.Println("读取错误:", err)
+		return
 	}
-}
-
-func (bus *ProFiBus) receiveLoop() {
-	defer bus.wg.Done()
-	buffer := make([]byte, datalink.MaxFrameSize)
-	for {
-		select {
-		case <-bus.closeChan:
-			return
-		default:
-			n, err := bus.physicalLayer.Read(buffer)
-			if err != nil {
-				continue
-			}
-			frame, err := datalink.Unmarshal(buffer[:n], bus.crcTable)
-			if err != nil {
-				continue
-			}
-			bus.receiveChan <- frame.Data
-		}
-	}
-}
-
-func (bus *ProFiBus) Send(data []byte) {
-	bus.sendChan <- data
-}
-
-func (bus *ProFiBus) Receive() ([]byte, error) {
-	select {
-	case data := <-bus.receiveChan:
-		return data, nil
-	case <-time.After(time.Second * 5):
-		return nil, errors.New("timeout")
-	}
-}
-
-func (bus *ProFiBus) Close() {
-	close(bus.closeChan)
-	bus.wg.Wait()
-	bus.physicalLayer.Close()
+	fmt.Printf("接收到数据: %s\n", buffer[:n])
 }

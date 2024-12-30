@@ -3,9 +3,24 @@ package serial
 import (
 	"fmt"
 	"os"
-	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
+
+// 定义 SpiIocTransfer 结构体
+type SpiIocTransfer struct {
+	TxBuf       uintptr
+	RxBuf       uintptr
+	Len         uint32
+	SpeedHz     uint32
+	DelayUsecs  uint16
+	BitsPerWord uint8
+	csChange    uint8
+}
+
+// 定义 SPI_IOC_MESSAGE 常量
+const SPI_IOC_MESSAGE_1 = 0x40006b00
 
 // SpiDevice 是 SPI 设备。
 type SpiDevice struct {
@@ -31,15 +46,16 @@ func (s *SpiDevice) Transfer(txData []byte, rxData []byte) error {
 		return fmt.Errorf("SPI 设备未打开")
 	}
 
-	// 执行 SPI 数据传输
-	transfer := syscall.SpiIocTransfer{
-		TxBuffer: uintptr(unsafe.Pointer(&txData[0])),
-		RxBuffer: uintptr(unsafe.Pointer(&rxData[0])),
-		Len:      uint32(len(txData)),
-		SpeedHz:  1000000, // 设置 SPI 时钟速度
+	// 定义 SpiIocTransfer 结构体
+	transfer := SpiIocTransfer{
+		TxBuf:   uintptr(unsafe.Pointer(&txData[0])),
+		RxBuf:   uintptr(unsafe.Pointer(&rxData[0])),
+		Len:     uint32(len(txData)),
+		SpeedHz: 1000000, // 设置 SPI 时钟速度
 	}
 
-	err := ioctl(s.device.Fd(), syscall.SPI_IOC_MESSAGE(1), uintptr(unsafe.Pointer(&transfer)))
+	// 使用 unix.IoctlSetInt 替代 ioctl
+	err := unix.IoctlSetInt(int(s.device.Fd()), SPI_IOC_MESSAGE_1, int(uintptr(unsafe.Pointer(&transfer))))
 	if err != nil {
 		return fmt.Errorf("SPI 数据传输失败：%s", err)
 	}

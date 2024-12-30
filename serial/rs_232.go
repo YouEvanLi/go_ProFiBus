@@ -54,7 +54,6 @@ func (r *RS232) Read(buffer []byte) (int, error) {
 	return n, nil
 }
 func (r *RS232) Close() error {
-	// 实现关闭 RS-232 串口的逻辑
 	if r.file == nil {
 		return fmt.Errorf("RS-232 设备未打开")
 	}
@@ -63,5 +62,6 @@ func (r *RS232) Close() error {
 	if err != nil {
 		return fmt.Errorf("关闭 RS-232 设备失败：%s", err)
 	}
+	r.file = nil // 确保文件指针被清空
 	return nil
 }
